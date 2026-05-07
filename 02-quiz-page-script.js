@@ -252,16 +252,36 @@ function fmtPrice(n) {
 
 /** Clean up title: remove brand prefix, cap length (same as homepage) */
 function cleanTitle(title, brand) {
-  let t = title || '';
+  if (!title) return '';
+  var t = title;
+
+  // Strip generic prefixes: "Laptop Second Hand" / "Laptop Refurbished"
   t = t.replace(/^Laptop\s+(Second\s*Hand|Refurbished)\s+/i, '');
-  if (brand) t = t.replace(new RegExp('^' + brand + '[\\s\\-–]?', 'i'), '');
-  t = t.replace(/\s+Refurbished\s*$/i, '');
+
+  // Strip brand prefix (e.g. "HP ", "Lenovo - ")
+  if (brand) {
+    t = t.replace(new RegExp('^' + brand + '[\\s\\-–]?', 'i'), '');
+  }
+
+  // KEY STEP: cut at the first screen-size marker (e.g. "15.6inch", "14\"",
+  // "13.3 inch"). Everything after this is specs (CPU/RAM/storage/OS) that
+  // already appears in the spec row below the title — no point repeating
+  // it inside the title. This gives consistent "model only" titles across
+  // all products regardless of how verbose the original title is.
+  var sizeRe = /\s*[-–—]?\s*\d{2}(?:\.\d)?\s*(?:inch|"|″|in\b)/i;
+  var sizeMatch = t.match(sizeRe);
+  if (sizeMatch) {
+    t = t.substring(0, sizeMatch.index);
+  }
+
+  // Strip trailing "Windows X" / "Refurbished" / orphan dashes / whitespace
   t = t.replace(/\s+Windows\s+\d+\s*$/i, '');
+  t = t.replace(/\s+Refurbished\s*$/i, '');
+  t = t.replace(/[\s\-–—]+$/, '');
   t = t.replace(/\s+/g, ' ').trim();
-  // Cut at first " - " if it's a meaningful model break
-  const parts = t.split(/\s*-\s*/);
-  if (parts[0].length >= 10) t = parts[0];
-  if (t.length > 60) t = t.slice(0, 57) + '…';
+
+  // Safety cap so a freak edge case doesn't blow out the layout
+  if (t.length > 50) t = t.slice(0, 47) + '…';
   return t;
 }
 
