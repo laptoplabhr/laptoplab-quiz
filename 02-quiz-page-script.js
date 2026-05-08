@@ -30,7 +30,7 @@ console.log('[LaptopLab] script loaded — path:', location.pathname);
    QUIZ STATE MACHINE
 ══════════════════════════════════════ */
 const QUIZ = {
-  answers: { purpose: null, budget: null, size: null },
+  answers: { purpose: null, budget: null, size: null, os: null },
   history: [1]
 };
 
@@ -38,7 +38,7 @@ const quizEl = document.getElementById('quiz');
 const steps  = quizEl.querySelectorAll('.quiz-step');
 const result = quizEl.querySelector('.quiz-result');
 
-/** Show a step by its data-step value ("1" / "2" / "3" / "result") */
+/** Show a step by its data-step value ("1" / "2" / "3" / "4" / "result") */
 function showStep(s) {
   steps.forEach(el => el.style.display = 'none');
   result.classList.remove('show');
@@ -75,16 +75,19 @@ quizEl.querySelectorAll('.quiz-opt').forEach(opt => {
 quizEl.querySelectorAll('.quiz-back').forEach(btn => {
   btn.addEventListener('click', () => {
     const back = btn.dataset.back;
-    // Remove last answer logically
+    // Remove last answer logically when stepping back
     if (back === '1') QUIZ.answers.purpose = null;
     if (back === '2') QUIZ.answers.budget  = null;
+    if (back === '3') QUIZ.answers.size    = null;
+    // (No need to clear .os here — the only way to land on step 4 is
+    //  forward from step 3, and back from step 4 goes to step 3, not 4)
     showStep(back);
   });
 });
 
 /* Restart */
 document.getElementById('restartBtn').addEventListener('click', () => {
-  QUIZ.answers = { purpose: null, budget: null, size: null };
+  QUIZ.answers = { purpose: null, budget: null, size: null, os: null };
   QUIZ.history = [1];
   showStep('1');
 });
@@ -97,6 +100,7 @@ function renderRecap() {
   if (a.purpose) items.push(a.purpose);
   if (a.budget)  items.push(a.budget);
   if (a.size)    items.push(a.size);
+  if (a.os)      items.push(a.os);
   wrap.innerHTML = items.map(i => `<span class="answer-chip"> <span class="answer-chip-emoji">${i.emoji}</span>${i.label} </span>`).join('');
 }
 
@@ -165,6 +169,18 @@ const SIZE_RANGES = {
   'standard': { min: 14.4, max: 16.1, label: '15.6″'      }, // includes 15.6
   'large':    { min: 16.2, max: 20,   label: '17″+'       },
   'any':      { min: 0,    max: 99,   label: 'orice'      }
+};
+
+/* OS preference (v1.1) — maps quiz answer to set of accepted product OS labels.
+   The labels here must match what detectOS() produces. macOS is intentionally
+   strict (no Windows fallback) — Apple buyers don't compromise. Other Windows
+   versions can fall back to "any" via the OS-relaxed tier in pickThree. */
+const OS_FILTER = {
+  'win11': { match: ['Win 11'],                       label: 'Windows 11', strict: false },
+  'win10': { match: ['Win 10'],                       label: 'Windows 10', strict: false },
+  'win7':  { match: ['Win 7'],                        label: 'Windows 7',  strict: false },
+  'macos': { match: ['macOS'],                        label: 'macOS',      strict: true  },
+  'any':   { match: null /* matches everything */,    label: 'orice OS',   strict: false }
 };
 
 /* Purpose → scoring keywords. Higher weight = bigger bonus.
@@ -397,10 +413,12 @@ function buildProduct(item, ns) {
   const avail     = g('availability');
   const size      = parseSize(title);
   const flags     = extractFlags(title);
+  const osLabel   = detectOS(title);  // 'Win 11' / 'Win 10' / 'Win 7' / 'macOS' / etc.
 
   return {
     title, brand, image, link, avail,
     price, salePrice, effPrice, size,
+    os:           osLabel,
     showSale: salePrice != null && price != null && salePrice < price,
     saleDiff: (price != null && salePrice != null) ? Math.round(price - salePrice) : 0,
     // Auto-detected feature flags (same engine as homepage)
@@ -419,6 +437,7 @@ function buildProduct(item, ns) {
  *    relaxed = {
  *      budgetWidened: false | { originalLabel, newLabel },
  *      sizeRelaxed:   false | { originalLabel },
+ *      osRelaxed:     false | { originalLabel },          // v1.1
  *      purposeIgnored: false,
  *      noMatchAtAll: false   // true when we fall back to full pool
  *    }
@@ -427,18 +446,26 @@ function buildProduct(item, ns) {
  *  Strategy — progressive relaxation so we ALWAYS show something,
  *  but we TELL the user what was relaxed.
  *
- *  Tier 1: strict budget + strict size + purpose score
- *  Tier 2: strict budget + RELAXED size + purpose score
- *  Tier 3: WIDENED budget (±25%) + RELAXED size
- *  Tier 4: any in-stock product sorted by purpose score
+ *  Tier 1: strict budget + strict size + strict OS  (everything matches)
+ *  Tier 2: strict budget + RELAXED size + strict OS
+ *  Tier 3: strict budget + RELAXED size + RELAXED OS  (only if user is not macOS-strict)
+ *  Tier 4: WIDENED budget (±25%) + RELAXED size + RELAXED OS
+ *  Tier 5: any in-stock product sorted by purpose score
+ *
+ *  Special case: if user picks macOS, we NEVER fall back to Windows.
+ *  Better to show fewer (or zero) results than serve a Windows laptop
+ *  to someone who explicitly wanted Apple.
  */
 function pickThree(pool, answers) {
   if (!pool.length) return null;
 
   const budgetCfg = BUDGET_RANGES[(answers.budget && answers.budget.value)];
   const sizeCfg   = SIZE_RANGES[(answers.size && answers.size.value)] || SIZE_RANGES.any;
+  const osCfg     = OS_FILTER[(answers.os && answers.os.value)] || OS_FILTER.any;
   const budgetLabel = (budgetCfg && budgetCfg.label) || '';
   const sizeLabel   = (sizeCfg && sizeCfg.label)   || '';
+  const osLabel     = (osCfg && osCfg.label)       || '';
+
 
   const inBudget = (p, range) =>
     range && p.effPrice != null &&
@@ -454,14 +481,32 @@ function pickThree(pool, answers) {
     return false;
   };
 
-  // ─── Tier 1: strict budget + strict size ───
-  let matches = pool.filter(p => inBudget(p, budgetCfg) && inSize(p, sizeCfg));
-  const strictCount = matches.length;
-  let relaxed = { budgetWidened: false, sizeRelaxed: false, noMatchAtAll: false };
+  /** OS check (v1.1):
+   *   - if user picked "any" → always true (no constraint)
+   *   - if osCfg.match is null (defensive) → always true
+   *   - else require product OS to be in osCfg.match list
+   *   - product without detectable OS is EXCLUDED from strict match
+   *     (same conservative principle as inSize) */
+  const inOS = (p, cfg) => {
+    if (!cfg || !cfg.match) return true;
+    if (!p.os) return false;
+    return cfg.match.indexOf(p.os) !== -1;
+  };
 
-  // ─── Tier 2: strict budget + relaxed size ───
+  // Whether the user explicitly picked an OS that we should try to honor
+  const userPickedOS = (answers.os && answers.os.value && answers.os.value !== 'any');
+  // macOS is treated as strict — we never fall back to Windows for an
+  // Apple-buyer. If they picked macOS, we honor it through every tier.
+  const isMacOSStrict = userPickedOS && (answers.os.value === 'macos');
+
+  // ─── Tier 1: strict budget + strict size + strict OS ───
+  let matches = pool.filter(p => inBudget(p, budgetCfg) && inSize(p, sizeCfg) && inOS(p, osCfg));
+  const strictCount = matches.length;
+  let relaxed = { budgetWidened: false, sizeRelaxed: false, osRelaxed: false, noMatchAtAll: false };
+
+  // ─── Tier 2: strict budget + relaxed size + strict OS ───
   if (matches.length < 3) {
-    const tier2 = pool.filter(p => inBudget(p, budgetCfg));
+    const tier2 = pool.filter(p => inBudget(p, budgetCfg) && inOS(p, osCfg));
     if (tier2.length > matches.length) {
       matches = tier2;
       if ((answers.size && answers.size.value) !== 'any' && strictCount < 3) {
@@ -470,27 +515,50 @@ function pickThree(pool, answers) {
     }
   }
 
-  // ─── Tier 3: widen budget by ±25% (still respect relaxed size) ───
+  // ─── Tier 3: strict budget + relaxed size + RELAXED OS ───
+  // Only enter this tier if user picked a Windows version we can fall back from.
+  // macOS picks NEVER relax — we'd rather show empty than show a Windows machine.
+  if (matches.length < 3 && userPickedOS && !isMacOSStrict) {
+    const tier3 = pool.filter(p => inBudget(p, budgetCfg));
+    if (tier3.length > matches.length) {
+      matches = tier3;
+      relaxed.osRelaxed = { originalLabel: osLabel };
+    }
+  }
+
+  // ─── Tier 4: widen budget by ±25% (still respect relaxed size; respect macOS-strict) ───
   let widenedCount = matches.length;
   if (matches.length < 3 && budgetCfg) {
     const widened = {
       min: Math.max(0, Math.floor(budgetCfg.min * 0.75)),
       max: Math.ceil(budgetCfg.max * 1.25)
     };
-    const tier3 = pool.filter(p => inBudget(p, widened));
-    if (tier3.length > matches.length) {
-      matches = tier3;
-      widenedCount = tier3.length;
+    // Honor macOS strictness even at this tier
+    const tier4 = pool.filter(p => inBudget(p, widened) && (!isMacOSStrict || inOS(p, osCfg)));
+    if (tier4.length > matches.length) {
+      matches = tier4;
+      widenedCount = tier4.length;
       relaxed.budgetWidened = {
         originalLabel: budgetLabel,
         newLabel: `${fmtPrice(widened.min)} – ${fmtPrice(widened.max)}`
       };
+      // If we ended up here AND the user picked a non-macOS OS, OS got relaxed too
+      if (userPickedOS && !isMacOSStrict && !relaxed.osRelaxed) {
+        // Check if any tier4 matches have the wrong OS — only flag if so
+        const someWrongOS = tier4.some(p => !inOS(p, osCfg));
+        if (someWrongOS) relaxed.osRelaxed = { originalLabel: osLabel };
+      }
     }
   }
 
-  // ─── Tier 4: last resort — any in-stock product ───
+  // ─── Tier 5: last resort — any in-stock product (still honor macOS strictness) ───
   if (matches.length < 1) {
-    matches = pool.slice();
+    if (isMacOSStrict) {
+      // macOS-strict: pool down to MacBooks only. May still be empty.
+      matches = pool.filter(p => inOS(p, osCfg));
+    } else {
+      matches = pool.slice();
+    }
     relaxed.noMatchAtAll = true;
   }
 
@@ -554,19 +622,37 @@ function pickThree(pool, answers) {
 }
 
 /** After trio is picked, check if the SHOWN products actually match the
- *  requested size. If they do (even though strict-match count was <3),
- *  suppress the "size relaxed" warning — the user got what they wanted. */
+ *  user's stated preferences. If they do (even though strict-match count
+ *  was <3), suppress the warning — the user got what they wanted. */
 function refineRelaxedFlag(result, answers) {
-  if (!result || !result.relaxed.sizeRelaxed) return result;
-  const sz = (answers.size && answers.size.value);
-  if (!sz || sz === 'any') return result;
-  const range = SIZE_RANGES[sz];
-  const trio = [result.cheaper, result.best, result.stronger].filter(Boolean);
-  const matchingSize = trio.filter(p => p.size != null && p.size >= range.min && p.size <= range.max);
-  // If every shown product matches the requested size, no need to warn
-  if (matchingSize.length === trio.length) {
-    result.relaxed.sizeRelaxed = false;
+  if (!result) return result;
+
+  // Refine SIZE relaxation
+  if (result.relaxed.sizeRelaxed) {
+    const sz = (answers.size && answers.size.value);
+    if (sz && sz !== 'any') {
+      const range = SIZE_RANGES[sz];
+      const trio = [result.cheaper, result.best, result.stronger].filter(Boolean);
+      const matchingSize = trio.filter(p => p.size != null && p.size >= range.min && p.size <= range.max);
+      if (matchingSize.length === trio.length) {
+        result.relaxed.sizeRelaxed = false;
+      }
+    }
   }
+
+  // Refine OS relaxation (v1.1) — same principle
+  if (result.relaxed.osRelaxed) {
+    const osVal = (answers.os && answers.os.value);
+    const osCfg = osVal && OS_FILTER[osVal];
+    if (osCfg && osCfg.match) {
+      const trio = [result.cheaper, result.best, result.stronger].filter(Boolean);
+      const matchingOS = trio.filter(p => p.os && osCfg.match.indexOf(p.os) !== -1);
+      if (matchingOS.length === trio.length) {
+        result.relaxed.osRelaxed = false;
+      }
+    }
+  }
+
   return result;
 }
 
@@ -619,17 +705,22 @@ function renderCards(result, isLive) {
   const stats = result.stats || {};
 
   if (r.noMatchAtAll) {
-    // Tier 4 — nothing fit at all, showing from full catalog by purpose score
+    // Tier 5 — nothing fit at all, showing from full catalog by purpose score
     summary.innerHTML = `ℹ️ Nu am găsit potriviri exacte, dar iată laptopurile cele mai apropiate de ce ai ales`;
     summary.className = 'result-match-summary warn';
     if (heading) heading.textContent = 'Recomandări apropiate';
   } else if (r.budgetWidened) {
-    // Tier 3 — had to widen budget
+    // Tier 4 — had to widen budget
     summary.innerHTML = `ℹ️ Am extins puțin bugetul ca să găsim potriviri bune (${r.budgetWidened.newLabel})`;
     summary.className = 'result-match-summary warn';
     if (heading) heading.textContent = 'Recomandări apropiate';
+  } else if (r.osRelaxed) {
+    // Tier 3 (v1.1) — OS preference was relaxed (budget still respected)
+    summary.innerHTML = `ℹ️ Puține opțiuni cu <strong>${r.osRelaxed.originalLabel}</strong> la acest buget — îți arătăm și alte sisteme potrivite`;
+    summary.className = 'result-match-summary warn';
+    if (heading) heading.textContent = 'Recomandări apropiate';
   } else if (r.sizeRelaxed) {
-    // Tier 2 — size was relaxed (budget still respected)
+    // Tier 2 — size was relaxed (budget + OS still respected)
     summary.innerHTML = `ℹ️ Puține opțiuni la mărimea <strong>${r.sizeRelaxed.originalLabel}</strong> — îți arătăm și alte mărimi potrivite`;
     summary.className = 'result-match-summary warn';
     if (heading) heading.textContent = 'Recomandări apropiate';
@@ -786,7 +877,7 @@ function setupAllMatches(result, isLive) {
   wrap.style.display = 'block';
 
   // Label depends on whether matches are exact or relaxed
-  const isExact = !r.noMatchAtAll && !r.budgetWidened && !r.sizeRelaxed;
+  const isExact = !r.noMatchAtAll && !r.budgetWidened && !r.sizeRelaxed && !r.osRelaxed;
   if (isExact) {
     lbl.textContent = `Vezi toate cele ${totalN} laptopuri potrivite`;
     sub.textContent = `${extraN} opțiuni în plus față de cele 3 de sus`;
