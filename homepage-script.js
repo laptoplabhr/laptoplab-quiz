@@ -2,7 +2,7 @@
    LaptopLab — Homepage JS (path-guarded)
    ──────────────────────────────────────────────────────────────────────
    Loaded from: https://cdn.jsdelivr.net/gh/laptoplabhr/laptoplab-quiz@main/homepage-script.js
-   Pasted into:  Gomag homepage HTML section
+   Pasted into:  Gomag homepage HTML section (03-homepage-section.html)
    Wait for: DOMContentLoaded (script tag has `defer`).
 
    Element guard: only runs if homepage markup is present (#heroCards).
@@ -13,22 +13,28 @@
      [LaptopLab home] script loaded   → JS file IS reaching the page
      [LaptopLab home] not homepage    → loaded but no homepage markup found
      [LaptopLab home] init OK         → all good, page is wired up
+
+   Update workflow:
+     1. Edit this file in the GitHub repo (laptoplabhr/laptoplab-quiz)
+     2. Commit changes
+     3. Bust jsDelivr cache:
+        https://purge.jsdelivr.net/gh/laptoplabhr/laptoplab-quiz@main/homepage-script.js
+     4. Reload site in incognito to verify
 ═══════════════════════════════════════════════════════════════════════ */
 console.log('[LaptopLab home] script loaded — path:', location.pathname);
 (function () {
   'use strict';
 
   // Element-based guard: presence of #heroCards means we're on the homepage.
-  // (Path-based guards are brittle — homepage URL could be /, /home, /index, etc.)
+  // Path-based guards are brittle (URL could be /, /home, /index, etc).
   if (!document.getElementById('heroCards')) {
     console.log('[LaptopLab home] not homepage — skipping init');
     return;
   }
   console.log('[LaptopLab home] init OK');
 
-/* Nav shadow */
-const nav = document.getElementById('siteNav');
-window.addEventListener('scroll', () => nav.classList.toggle('shadow', window.scrollY > 20), { passive: true });
+'use strict';
+
 
 /* Scroll reveal */
 const ro = new IntersectionObserver(entries => {
@@ -268,9 +274,9 @@ const cntObs = new IntersectionObserver(entries => {
   }
 
   // ─── Spec string for hero/side cards ───
-  // Format: "i5-5300U · 8GB RAM · 256GB SSD · 14″ FHD · Win 10"
-  // Screen + resolution are combined into one bit so they read as a unit.
   function buildSpec(p) {
+    // Format: "i5-5300U · 8GB RAM · 256GB SSD · 14″ FHD · Win 10"
+    // Screen + resolution are combined into one bit so they read as a unit.
     const screenBit = p.screen
       ? (p.resolution ? p.screen + ' ' + p.resolution : p.screen)
       : '';
@@ -281,7 +287,6 @@ const cntObs = new IntersectionObserver(entries => {
   // ─── Spec string for grid cards (more compact) ───
   // Same format as hero — consistency across the site, and the OS +
   // resolution are universally useful pieces of info that buyers scan for.
-  // Limited to 2 lines visually via -webkit-line-clamp in CSS.
   function buildSpecCompact(p) {
     const screenBit = p.screen
       ? (p.resolution ? p.screen + ' ' + p.resolution : p.screen)
@@ -456,8 +461,9 @@ const cntObs = new IntersectionObserver(entries => {
   function escapeAttr(s) { return escapeHTML(s); }
 
   // ─── Expose for quiz page & debugging ───
-  // Also exposed: window.LaptopLab.version — bumped when extraction logic
-  // changes substantively. Lets us see in the console which version is live.
+  // window.LaptopLab.version is bumped when extraction logic changes
+  // substantively. Check it in the browser console to confirm which
+  // version is loaded after a deploy.
   window.LaptopLab = {
     version: '2.0',  // 2.0 = adds resolution detection (FHD/QHD/Retina/4K/HD+/HD)
     FEED_URL,
@@ -544,5 +550,6 @@ const cntObs = new IntersectionObserver(entries => {
     gCount.textContent = '· recenzii Google';
   }
 })();
+
 
 })(); // end of homepage path-guard wrapper
