@@ -131,21 +131,40 @@ const cntObs = new IntersectionObserver(entries => {
   }
 
   // ─── Title cleaners ───
+  // Strip prefix + brand + tail noise. Used for spec rows and tooltips
+  // where we want the descriptive title minus the boilerplate.
   function cleanTitle(title, brand) {
     let t = title || '';
     t = t.replace(/^Laptop\s+(Second\s*Hand|Refurbished)\s+/i, '');
     if (brand) t = t.replace(new RegExp('^' + brand + '[\\s\\-–]?', 'i'), '');
     t = t.replace(/\s+Refurbished\s*$/i, '');
     t = t.replace(/\s+Windows\s+\d+\s*$/i, '');
-    // collapse whitespace
     t = t.replace(/\s+/g, ' ').trim();
     return t;
   }
+
+  // Card-display name — JUST the model identifier, nothing else.
+  // Strategy: take cleanTitle output, then cut at the first screen-size
+  // marker (15.6inch, 14", 13.3 inch, etc). Everything after the screen
+  // size is specs that already appear in the spec row below the title,
+  // so repeating them in the title creates visual noise.
+  //
+  // Examples:
+  //   "V110-15ISK - 15.6inch FHD Intel I5-7200U..."  →  "V110-15ISK"
+  //   "MacBook Pro A1706 13.3inch QHD i5-6267U..."   →  "MacBook Pro A1706"
+  //   "Latitude 5590"                                →  "Latitude 5590"  (no size, kept as-is)
+  //   "ThinkPad T440s TOUCH 14inch i7-4600U..."      →  "ThinkPad T440s TOUCH"
   function shortName(title, brand) {
-    const c = cleanTitle(title, brand);
-    // Cut after first ' - ' so we show just the model part
-    const parts = c.split(/\s*-\s*/);
-    return parts[0].length >= 10 ? parts[0] : c.slice(0, 60);
+    let t = cleanTitle(title, brand);
+    // Cut at the first screen-size marker.
+    const sizeRe = /\s*[-–—]?\s*\d{2}(?:\.\d)?\s*(?:inch|"|″|in\b)/i;
+    const m = t.match(sizeRe);
+    if (m) t = t.substring(0, m.index);
+    // Trim trailing dashes/spaces left over from the cut
+    t = t.replace(/[\s\-–—]+$/, '').trim();
+    // Safety cap
+    if (t.length > 50) t = t.slice(0, 47) + '…';
+    return t;
   }
 
   // ─── ATTRIBUTE EXTRACTION — all from title text ───
@@ -465,7 +484,7 @@ const cntObs = new IntersectionObserver(entries => {
   // substantively. Check it in the browser console to confirm which
   // version is loaded after a deploy.
   window.LaptopLab = {
-    version: '2.0',  // 2.0 = adds resolution detection (FHD/QHD/Retina/4K/HD+/HD)
+    version: '2.1',  // 2.1 = title cleaning fix (cut at screen-size marker)
     FEED_URL,
     getFeed,
     parseItem,
