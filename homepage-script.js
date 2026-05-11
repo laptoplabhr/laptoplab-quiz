@@ -484,7 +484,7 @@ const cntObs = new IntersectionObserver(entries => {
   // substantively. Check it in the browser console to confirm which
   // version is loaded after a deploy.
   window.LaptopLab = {
-    version: '2.3',  // 2.3 = real PNG brand logos, full-bleed quiz teaser, laptop scene centered
+    version: '2.4',  // 2.4 = full-width breakout (escapes Gomag's narrow container)
     FEED_URL,
     getFeed,
     parseItem,
