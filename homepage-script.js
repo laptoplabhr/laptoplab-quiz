@@ -484,7 +484,7 @@ const cntObs = new IntersectionObserver(entries => {
   // substantively. Check it in the browser console to confirm which
   // version is loaded after a deploy.
   window.LaptopLab = {
-    version: '2.1',  // 2.1 = title cleaning fix (cut at screen-size marker)
+    version: '2.2',  // 2.2 = hero cards restored on desktop, big trust strip, brand logos, no bottom CTA, bigger typography
     FEED_URL,
     getFeed,
     parseItem,
